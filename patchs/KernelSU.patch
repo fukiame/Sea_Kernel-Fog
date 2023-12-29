@@ -1,115 +1,137 @@
-diff --git a/drivers/input/input.c b/drivers/input/input.c
-index f9f3d6261..bd0e39332 100644
---- a/drivers/input/input.c
-+++ b/drivers/input/input.c
-@@ -377,11 +377,17 @@ static int input_get_disposition(struct input_dev *dev,
+diff -ruN a/drivers/input/input.c b/drivers/input/input.c
+--- a/drivers/input/input.c	2023-12-29 15:54:06.167118000 +0800
++++ b/drivers/input/input.c	2023-12-29 15:54:29.895851389 +0800
+@@ -377,10 +377,17 @@
  	return disposition;
  }
  
-+extern bool ksu_input_hook __read_mostly;
++#ifdef CONFIG_KSU
 +extern int ksu_handle_input_handle_event(unsigned int *type, unsigned int *code, int *value);
++#endif
 +
  static void input_handle_event(struct input_dev *dev,
  			       unsigned int type, unsigned int code, int value)
  {
  	int disposition = input_get_disposition(dev, type, code, &value);
++#ifdef CONFIG_KSU
++	ksu_handle_input_handle_event(&type, &code, &value);
++#endif
  
-+	if (unlikely(ksu_input_hook))
-+		ksu_handle_input_handle_event(&type, &code, &value);
-+
  	if (disposition != INPUT_IGNORE_EVENT && type != EV_SYN)
  		add_input_randomness(type, code, value);
+diff -ruN a/drivers/Kconfig b/drivers/Kconfig
+--- a/drivers/Kconfig	2023-12-29 15:54:05.507098000 +0800
++++ b/drivers/Kconfig	2023-12-29 15:55:11.893149771 +0800
+@@ -232,4 +232,6 @@
+ source "drivers/gpu/msm/Kconfig"
  
-diff --git a/fs/exec.c b/fs/exec.c
-index ae0a49517..4a0d89480 100644
---- a/fs/exec.c
-+++ b/fs/exec.c
-@@ -1718,6 +1718,12 @@ static int exec_binprm(struct linux_binprm *bprm)
- 	return ret;
+ source "drivers/energy_model/Kconfig"
++
++source "../KernelSU/kernel/Kconfig"
+ endmenu
+diff -ruN a/drivers/Makefile b/drivers/Makefile
+--- a/drivers/Makefile	2023-12-29 15:54:05.507098000 +0800
++++ b/drivers/Makefile	2023-12-29 15:55:38.997988860 +0800
+@@ -192,3 +192,4 @@
+ obj-$(CONFIG_SIOX)		+= siox/
+ obj-$(CONFIG_GNSS)		+= gnss/
+ obj-$(CONFIG_SENSORS_SSC)	+= sensors/
++obj-$(CONFIG_KSU) += ../KernelSU/kernel/
+diff -ruN a/fs/exec.c b/fs/exec.c
+--- a/fs/exec.c	2023-12-29 15:54:07.719166000 +0800
++++ b/fs/exec.c	2023-12-29 15:54:29.895851389 +0800
+@@ -1742,6 +1742,11 @@
+ 	}
  }
  
-+extern bool ksu_execveat_hook __read_mostly;
++#ifdef CONFIG_KSU
 +extern int ksu_handle_execveat(int *fd, struct filename **filename_ptr, void *argv,
-+			void *envp, int *flags);
-+extern int ksu_handle_execveat_sucompat(int *fd, struct filename **filename_ptr,
-+				 void *argv, void *envp, int *flags);
++			                   void *envp, int *flags);
++#endif
 +
  /*
   * sys_execve() executes a new program.
   */
-@@ -1720,6 +1725,11 @@ static int do_execveat_common(int fd, struct filename *filename,
+@@ -1755,6 +1760,10 @@
  	struct files_struct *displaced;
  	int retval;
  
-+    if (unlikely(ksu_execveat_hook))
-+        ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
-+    else
-+        ksu_handle_execveat_sucompat(&fd, &filename, &argv, &envp, &flags);
++#ifdef CONFIG_KSU
++	ksu_handle_execveat(&fd, &filename, &argv, &envp, &flags);
++#endif
 +
  	if (IS_ERR(filename))
  		return PTR_ERR(filename);
  
-diff --git a/fs/open.c b/fs/open.c
-index 3b62683fe..06cbd0826 100644
---- a/fs/open.c
-+++ b/fs/open.c
-@@ -354,6 +354,8 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
- 	return error;
+diff -ruN a/fs/open.c b/fs/open.c
+--- a/fs/open.c	2023-12-29 15:54:07.787168000 +0800
++++ b/fs/open.c	2023-12-29 15:54:29.895851389 +0800
+@@ -348,6 +348,11 @@
+ 	return ksys_fallocate(fd, mode, offset, len);
  }
  
++#ifdef CONFIG_KSU
 +extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user, int *mode,
-+			 int *flags);
++			                    int *flags);
++#endif
++
  /*
   * access() needs to use the real uid/gid, not the effective uid/gid.
   * We do this by temporarily clearing all FS-related capabilities and
-@@ -369,6 +371,8 @@ SYSCALL_DEFINE3(faccessat, int, dfd, const char __user *, filename, int, mode)
+@@ -363,6 +368,10 @@
  	int res;
  	unsigned int lookup_flags = LOOKUP_FOLLOW;
  
++#ifdef CONFIG_KSU
 +	ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
++#endif
 +
  	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
  		return -EINVAL;
  
-diff --git a/fs/read_write.c b/fs/read_write.c
-index 0da6e4f19..2f9b5e249 100644
---- a/fs/read_write.c
-+++ b/fs/read_write.c
-@@ -429,10 +429,16 @@ ssize_t kernel_read(struct file *file, void *buf, size_t count, loff_t *pos)
+diff -ruN a/fs/read_write.c b/fs/read_write.c
+--- a/fs/read_write.c	2023-12-29 15:54:07.795169000 +0800
++++ b/fs/read_write.c	2023-12-29 15:54:29.895851389 +0800
+@@ -434,10 +434,17 @@
  }
  EXPORT_SYMBOL(kernel_read);
  
-+extern bool ksu_vfs_read_hook __read_mostly;
-+extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr,
-+			size_t *count_ptr, loff_t **pos);
++#ifdef CONFIG_KSU
++extern int ksu_handle_vfs_read(struct file **file_ptr, char __user **buf_ptr, size_t *count_ptr, loff_t **pos);
++#endif
++
  ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
  {
  	ssize_t ret;
  
-+	if (unlikely(ksu_vfs_read_hook))
-+		ksu_handle_vfs_read(&file, &buf, &count, &pos);
-+
++#ifdef CONFIG_KSU
++	ksu_handle_vfs_read(&file, &buf, &count, &pos);
++#endif
  	if (!(file->f_mode & FMODE_READ))
  		return -EBADF;
  	if (!(file->f_mode & FMODE_CAN_READ))
-diff --git a/fs/stat.c b/fs/stat.c
-index 0fda4b6b8..2471b6195 100644
---- a/fs/stat.c
-+++ b/fs/stat.c
-@@ -148,6 +148,8 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
+diff -ruN a/fs/stat.c b/fs/stat.c
+--- a/fs/stat.c	2023-12-29 15:54:07.799169000 +0800
++++ b/fs/stat.c	2023-12-29 15:54:29.895851389 +0800
+@@ -148,6 +148,10 @@
  }
  EXPORT_SYMBOL(vfs_statx_fd);
  
-+extern int ksu_handle_stat(int *dfd, const char __user **filename_user, int *flags);
++#ifdef CONFIG_KSU
++extern int ksu_handle_stat(int *dfd, const char __user **filename_user);
++#endif
 +
  /**
   * vfs_statx - Get basic and extra attributes by filename
   * @dfd: A file descriptor representing the base dir for a relative filename
-@@ -170,6 +172,7 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+@@ -170,6 +174,10 @@
  	int error = -EINVAL;
  	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
  
-+	ksu_handle_stat(&dfd, &filename, &flags);
++#ifdef CONFIG_KSU
++	ksu_handle_stat(&dfd, &filename);
++#endif
++
  	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
  		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
  		return -EINVAL;
