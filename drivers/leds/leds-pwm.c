@@ -206,6 +206,7 @@ static int led_pwm_add(struct device *dev, struct led_pwm_priv *priv,
 		       struct led_pwm *led, struct device_node *child)
 {
 	struct led_pwm_data *led_data = &priv->leds[priv->num_leds];
+	struct pwm_args pargs;
 	int ret;
 
 	led_data->active_low = led->active_low;
@@ -231,10 +232,17 @@ static int led_pwm_add(struct device *dev, struct led_pwm_priv *priv,
 	led_data->cdev.brightness_set_blocking = led_pwm_set;
 	led_data->cdev.blink_set = led_pwm_blink_set;
 
-	pwm_init_state(led_data->pwm, &led_data->pwmstate);
+	/*
+	 * FIXME: pwm_apply_args() should be removed when switching to the
+	 * atomic PWM API.
+	 */
+	pwm_apply_args(led_data->pwm);
 
-	if (!led_data->pwmstate.period)
-		led_data->pwmstate.period = led->pwm_period_ns;
+	pwm_get_args(led_data->pwm, &pargs);
+
+	led_data->period = pargs.period;
+	if (!led_data->period && (led->pwm_period_ns > 0))
+		led_data->period = led->pwm_period_ns;
 
 	ret = led_classdev_register(dev, &led_data->cdev);
 	if (ret == 0) {
